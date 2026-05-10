@@ -7,3 +7,4 @@ server/uploads/
 server/calora.db
 server/data.json
 .env
+server/calora.db-*
