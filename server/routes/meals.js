@@ -5,7 +5,7 @@ import { join, dirname, extname } from 'path';
 import { fileURLToPath } from 'url';
 import { randomUUID } from 'crypto';
 import { GoogleGenerativeAI } from '@google/generative-ai';
-import db from '../db.js';
+import { insertMeal, getMeals, getMealById, deleteMealById } from '../store.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const router = express.Router();
@@ -82,24 +82,16 @@ router.post('/', upload.single('image'), async (req, res) => {
       return res.status(500).json({ error: 'Failed to parse nutrition data from AI response' });
     }
 
-    const stmt = db.prepare(`
-      INSERT INTO meals (created_at, image_filename, food_items, nutrition, meal_type, analysis_notes)
-      VALUES (?, ?, ?, ?, ?, ?)
-    `);
+    const meal = insertMeal({
+      image_filename: req.file.filename,
+      food_items: analysis.food_items || [],
+      nutrition: analysis.nutrition || {},
+      meal_type: analysis.meal_type || 'meal',
+      analysis_notes: analysis.analysis_notes || '',
+    });
 
-    const inserted = stmt.run(
-      Date.now(),
-      req.file.filename,
-      JSON.stringify(analysis.food_items || []),
-      JSON.stringify(analysis.nutrition || {}),
-      analysis.meal_type || 'meal',
-      analysis.analysis_notes || ''
-    );
-
-    const meal = db.prepare('SELECT * FROM meals WHERE id = ?').get(inserted.lastInsertRowid);
     res.json(formatMeal(meal));
   } catch (err) {
-    // Clean up uploaded file on error
     try { unlinkSync(req.file.path); } catch {}
     console.error('Meal analysis error:', err);
     res.status(500).json({ error: err.message || 'Analysis failed' });
@@ -109,40 +101,29 @@ router.post('/', upload.single('image'), async (req, res) => {
 router.get('/', (req, res) => {
   const limit = Math.min(parseInt(req.query.limit) || 50, 200);
   const offset = parseInt(req.query.offset) || 0;
-  const meals = db.prepare(
-    'SELECT * FROM meals ORDER BY created_at DESC LIMIT ? OFFSET ?'
-  ).all(limit, offset);
-  res.json(meals.map(formatMeal));
+  res.json(getMeals(limit, offset).map(formatMeal));
 });
 
 router.get('/:id', (req, res) => {
-  const meal = db.prepare('SELECT * FROM meals WHERE id = ?').get(req.params.id);
+  const meal = getMealById(req.params.id);
   if (!meal) return res.status(404).json({ error: 'Meal not found' });
   res.json(formatMeal(meal));
 });
 
 router.delete('/:id', (req, res) => {
-  const meal = db.prepare('SELECT * FROM meals WHERE id = ?').get(req.params.id);
+  const meal = getMealById(req.params.id);
   if (!meal) return res.status(404).json({ error: 'Meal not found' });
 
-  db.prepare('DELETE FROM meals WHERE id = ?').run(req.params.id);
-
   if (meal.image_filename) {
-    try {
-      unlinkSync(join(__dirname, '..', 'uploads', meal.image_filename));
-    } catch {}
+    try { unlinkSync(join(__dirname, '..', 'uploads', meal.image_filename)); } catch {}
   }
 
+  deleteMealById(req.params.id);
   res.json({ success: true });
 });
 
 function formatMeal(m) {
-  return {
-    ...m,
-    food_items: JSON.parse(m.food_items),
-    nutrition: JSON.parse(m.nutrition),
-    image_url: m.image_filename ? `/uploads/${m.image_filename}` : null,
-  };
+  return { ...m, image_url: m.image_filename ? `/uploads/${m.image_filename}` : null };
 }
 
 export default router;

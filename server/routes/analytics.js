@@ -1,15 +1,11 @@
 import express from 'express';
-import db from '../db.js';
+import { getMealsInRange, getMealCount } from '../store.js';
 
 const router = express.Router();
 
-function parseNutrition(raw) {
-  try { return JSON.parse(raw); } catch { return {}; }
-}
-
 function sumNutrition(meals) {
   return meals.reduce((acc, m) => {
-    const n = parseNutrition(m.nutrition);
+    const n = m.nutrition || {};
     Object.keys(n).forEach(key => {
       acc[key] = (acc[key] || 0) + (Number(n[key]) || 0);
     });
@@ -28,14 +24,8 @@ function dayBounds(offsetDays = 0) {
 // GET /api/analytics/today
 router.get('/today', (req, res) => {
   const [start, end] = dayBounds(0);
-  const meals = db.prepare(
-    'SELECT nutrition, meal_type FROM meals WHERE created_at >= ? AND created_at <= ?'
-  ).all(start, end);
-
-  res.json({
-    meal_count: meals.length,
-    totals: sumNutrition(meals),
-  });
+  const meals = getMealsInRange(start, end);
+  res.json({ meal_count: meals.length, totals: sumNutrition(meals) });
 });
 
 // GET /api/analytics/weekly — last 7 days of daily totals
@@ -43,10 +33,7 @@ router.get('/weekly', (req, res) => {
   const days = [];
   for (let i = 6; i >= 0; i--) {
     const [start, end] = dayBounds(i);
-    const meals = db.prepare(
-      'SELECT nutrition FROM meals WHERE created_at >= ? AND created_at <= ?'
-    ).all(start, end);
-
+    const meals = getMealsInRange(start, end);
     const date = new Date(start);
     days.push({
       date: date.toISOString().split('T')[0],
@@ -60,13 +47,13 @@ router.get('/weekly', (req, res) => {
 
 // GET /api/analytics/summary
 router.get('/summary', (req, res) => {
-  const totalMeals = db.prepare('SELECT COUNT(*) as c FROM meals').get().c;
   const [wStart] = dayBounds(6);
-  const activeDays = db.prepare(
-    'SELECT COUNT(DISTINCT (created_at / 86400000)) as d FROM meals WHERE created_at >= ?'
-  ).get(wStart).d;
+  const [wEnd] = dayBounds(0);
+  const weekMeals = getMealsInRange(wStart, wEnd[1]);
 
-  res.json({ totalMeals, activeDays });
+  const daySet = new Set(weekMeals.map(m => new Date(m.created_at).toDateString()));
+
+  res.json({ totalMeals: getMealCount(), activeDays: daySet.size });
 });
 
 export default router;

@@ -1,5 +1,3 @@
-
-
 # Calora
 node_modules/
 server/node_modules/
@@ -7,6 +5,5 @@ client/node_modules/
 client/dist/
 server/uploads/
 server/calora.db
-server/calora.db-shm
-server/calora.db-wal
+server/data.json
 .env
