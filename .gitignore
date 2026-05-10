@@ -7,4 +7,6 @@ client/node_modules/
 client/dist/
 server/uploads/
 server/calora.db
+server/calora.db-shm
+server/calora.db-wal
 .env
