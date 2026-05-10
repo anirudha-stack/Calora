@@ -4,7 +4,7 @@ import { readFileSync, unlinkSync } from 'fs';
 import { join, dirname, extname } from 'path';
 import { fileURLToPath } from 'url';
 import { randomUUID } from 'crypto';
-import Anthropic from '@anthropic-ai/sdk';
+import { GoogleGenerativeAI } from '@google/generative-ai';
 import db from '../db.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -27,7 +27,8 @@ const upload = multer({
   },
 });
 
-const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
+const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
+const model = genAI.getGenerativeModel({ model: 'gemini-1.5-flash' });
 
 const SYSTEM_PROMPT = `You are an expert nutritionist analyzing a food photo.
 Identify ALL food and drink items visible. Estimate realistic portion sizes.
@@ -66,30 +67,18 @@ router.post('/', upload.single('image'), async (req, res) => {
     const base64Image = imageBuffer.toString('base64');
     const mediaType = req.file.mimetype;
 
-    const message = await client.messages.create({
-      model: 'claude-sonnet-4-6',
-      max_tokens: 1024,
-      messages: [
-        {
-          role: 'user',
-          content: [
-            {
-              type: 'image',
-              source: { type: 'base64', media_type: mediaType, data: base64Image },
-            },
-            { type: 'text', text: SYSTEM_PROMPT },
-          ],
-        },
-      ],
-    });
+    const result = await model.generateContent([
+      { inlineData: { data: base64Image, mimeType: mediaType } },
+      SYSTEM_PROMPT,
+    ]);
 
     let analysis;
     try {
-      const text = message.content[0].text.trim();
+      const text = result.response.text().trim();
       const jsonStr = text.replace(/^```(?:json)?\n?/, '').replace(/\n?```$/, '');
       analysis = JSON.parse(jsonStr);
     } catch {
-      console.error('Claude response parse failed:', message.content[0].text);
+      console.error('Gemini response parse failed:', result.response.text());
       return res.status(500).json({ error: 'Failed to parse nutrition data from AI response' });
     }
 
@@ -98,7 +87,7 @@ router.post('/', upload.single('image'), async (req, res) => {
       VALUES (?, ?, ?, ?, ?, ?)
     `);
 
-    const result = stmt.run(
+    const inserted = stmt.run(
       Date.now(),
       req.file.filename,
       JSON.stringify(analysis.food_items || []),
@@ -107,7 +96,7 @@ router.post('/', upload.single('image'), async (req, res) => {
       analysis.analysis_notes || ''
     );
 
-    const meal = db.prepare('SELECT * FROM meals WHERE id = ?').get(result.lastInsertRowid);
+    const meal = db.prepare('SELECT * FROM meals WHERE id = ?').get(inserted.lastInsertRowid);
     res.json(formatMeal(meal));
   } catch (err) {
     // Clean up uploaded file on error

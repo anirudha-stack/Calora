@@ -10,8 +10,8 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 const app = express();
 const PORT = process.env.PORT || 3001;
 
-if (!process.env.ANTHROPIC_API_KEY) {
-  console.warn('⚠️  ANTHROPIC_API_KEY not set — food analysis will fail');
+if (!process.env.GEMINI_API_KEY) {
+  console.warn('⚠️  GEMINI_API_KEY not set — food analysis will fail');
 }
 
 app.use(cors());
